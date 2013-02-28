@@ -26,6 +26,12 @@ namespace tcl {
       variables[name] = value;
     }
 
+    std::string get(std::string const& name)
+    {
+      VariableMap::const_iterator result = variables.find(name);
+      return result == variables.end() ? "" : result->second;
+    }
+
     bool get(std::string const& name, std::string & value) const
     {
       VariableMap::const_iterator result = variables.find(name);
