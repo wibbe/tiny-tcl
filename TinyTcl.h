@@ -10,7 +10,8 @@ namespace tcl {
   struct Context;
   struct CallFrame;
 
-  typedef bool (*Procedure)(Context * ctx, std::vector<std::string> const& args, void * data);
+  typedef std::vector<std::string> ArgumentVector;
+  typedef bool (*ProcedureCallback)(Context * ctx, ArgumentVector const& args, void * data);
 
   typedef std::map<std::string, std::string> VariableMap;
 
@@ -38,6 +39,17 @@ namespace tcl {
     std::string result;
   };
 
+  struct Procedure
+  {
+    Procedure(ProcedureCallback callback, void * data)
+      : callback(callback),
+        data(data)
+    { }
+
+    ProcedureCallback callback;
+    void * data;
+  };
+
   typedef std::map<std::string, Procedure> ProcedureMap;
   typedef std::vector<CallFrame> CallFrameVector;
 
@@ -45,9 +57,10 @@ namespace tcl {
   {
     Context();
 
-    bool evaluate(std::string const& code);
-    bool registerProc(std::string const& name, Procedure proc);
+    bool evaluate(std::string const& code, bool debug = false);
+    bool registerProc(std::string const& name, ProcedureCallback proc, void * data = 0);
 
+    bool arityError(std::string const& error);
     bool reportError(std::string const& _error)
     {
       error = _error;

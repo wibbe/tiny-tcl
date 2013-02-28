@@ -20,11 +20,24 @@ namespace tcl {
     Error
   };
 
+  static const char * tokenAsReadable[] = {
+    "EndOfLine",
+    "EndOfFile",
+    "Separator",
+    "String",
+    "Variable",
+    "Escaped",
+    "Command",
+    "Append",
+    "Error"
+  };
+
   struct Parser
   {
     Parser(std::string const& code)
       : code(code),
         value(""),
+        token(EndOfLine),
         current(code.empty() ? 0 : code[0]),
         pos(0),
         insideString(false)
@@ -94,64 +107,11 @@ namespace tcl {
         level++;
       }
 
-      p->inc();
       p->value += p->current;
+      p->inc();
     }
 
     return true;
-  }
-
-  static bool parseString(Parser * p)
-  {
-    const bool newWord = (p->token == Separator || p->token == EndOfLine || p->token == String);
-
-    if (newWord && p->current == '{')
-      return parseBracet(p);
-    else if (newWord && p->current == '"')
-    {
-      p->insideString = true;
-      p->inc();
-    }
-
-    p->value = "";
-
-    while (true)
-    {
-      if (p->eof())
-      {
-        p->token = Escaped;
-        return true;
-      }
-
-      switch (p->current)
-      {
-        case '\\':
-          if (p->len() >= 2)
-          {
-            p->value += p->current;
-            p->inc();
-          }
-          break;
-
-        case '$': case '[':
-          p->token = Escaped;
-          return true;
-
-        case '"':
-          if (p->insideString)
-          {
-            p->token = Escaped;
-            p->insideString = false;
-            return true;
-          }
-          break;
-      }
-
-      p->value += p->current;
-      p->inc();
-    }
-
-    return String;
   }
 
   static bool parseComment(Parser * p)
@@ -163,6 +123,46 @@ namespace tcl {
 
   static bool parseCommand(Parser * p)
   {
+    int outerLevel = 1;
+    int innerLevel = 0;
+
+    p->inc();
+    p->value = "";
+
+    while (true)
+    {
+      if (p->eof())
+        break;
+      else if (p->current == '[' && innerLevel == 0)
+      {
+        outerLevel++;
+      }
+      else if (p->current == ']' && innerLevel == 0)
+      {
+        if (--outerLevel == 0)
+          break;
+      }
+      else if (p->current == '\\')
+      {
+        p->inc();
+      }
+      else if (p->current == '{')
+      {
+        innerLevel++;
+      }
+      else if (p->current == '}')
+      {
+        if (innerLevel > 0)
+          innerLevel--;
+      }
+
+      p->value += p->current;
+      p->inc();
+    }
+
+    if (p->current == ']')
+      p->inc();
+
     p->token = Command;
     return true;
   }
@@ -203,8 +203,71 @@ namespace tcl {
     return true;
   }
 
+  static bool parseString(Parser * p)
+  {
+    const bool newWord = (p->token == Separator || p->token == EndOfLine || p->token == String);
+
+    if (newWord && p->current == '{')
+      return parseBracet(p);
+    else if (newWord && p->current == '"')
+    {
+      p->insideString = true;
+      p->inc();
+    }
+
+    p->value = "";
+
+    while (true)
+    {
+      if (p->eof())
+      {
+        p->token = Escaped;
+        return true;
+      }
+
+      switch (p->current)
+      {
+        case '\\':
+          if (p->len() >= 2)
+          {
+            p->value += p->current;
+            p->inc();
+          }
+          break;
+
+        case '$': case '[':
+          p->token = Escaped;
+          return true;
+
+        case ' ': case '\t': case '\n': case ';':
+          if (!p->insideString)
+          {
+            p->token = Escaped;
+            return true;
+          }
+          break;
+
+        case '"':
+          if (p->insideString)
+          {
+            p->inc();
+            p->token = Escaped;
+            p->insideString = false;
+            return true;
+          }
+          break;
+      }
+
+      p->value += p->current;
+      p->inc();
+    }
+
+    return String;
+  }
+
   bool Parser::next()
   {
+    value = "";
     if (pos == code.size())
     {
       token = EndOfFile;
@@ -213,9 +276,7 @@ namespace tcl {
 
     while (true)
     {
-      char t = code[pos];
-
-      switch (t)
+      switch (current)
       {
         case ' ': case '\t': case '\r':
           if (insideString)
@@ -236,13 +297,8 @@ namespace tcl {
           return parseCommand(this);
 
         case '#':
-          if (token == EndOfLine)
-          {
-            parseComment(this);
-            continue;
-          }
-
-          return parseString(this);
+          parseComment(this);
+          continue;
 
         default:
           return parseString(this);
@@ -250,17 +306,61 @@ namespace tcl {
     }
   }
 
-  // -- Context --
+  // -- Build in functions --
 
-  static bool buildInPuts(Context * ctx, std::vector<std::string> const& args, void * data);
+  static bool builtInPuts(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() > 1)
+      for (size_t i = 1, len = args.size(); i < len; ++i)
+        std::cout << args[i] << (((i - 1) == len) ? "" : " ");
+
+    std::cout << std::endl;
+
+    return true;
+  }
+
+  static bool builtInSet(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    const size_t len = args.size();
+
+    if (len == 2)
+    {
+      return ctx->current().get(args[1], ctx->current().result);
+    }
+    else if (len == 3)
+    {
+      ctx->current().result = args[2];
+      ctx->current().set(args[1], args[2]);
+      return true;
+    }
+    else
+      return ctx->reportError("Wrong number of arguments to " + args[0]);
+  }
+
+  static bool builtInIf(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() != 3 && args.size() != 5)
+      return ctx->reportError("")
+
+    return true;
+  }
+
+  // -- Context --
 
   Context::Context()
   {
     frames.push_back(CallFrame());
-    registerProc("puts", &buildInPuts);
+    registerProc("puts", &builtInPuts);
+    registerProc("set", &builtInSet);
+    registerProc("if", &builtInIf);
   }
 
-  bool Context::evaluate(std::string const& code)
+  bool Context::arityError(std::string const& error)
+  {
+
+  }
+
+  bool Context::evaluate(std::string const& code, bool debug)
   {
     Parser parser(code);
 
@@ -273,8 +373,8 @@ namespace tcl {
       if (!parser.next())
         return false;
 
-      if (parser.token == EndOfFile)
-        break;
+      if (debug)
+        std::cout << "Token: " << tokenAsReadable[parser.token] << " = '" << parser.value << "'" << std::endl;
 
       std::string value = parser.value;
       if (parser.token == Variable)
@@ -287,7 +387,7 @@ namespace tcl {
       }
       else if (parser.token == Command)
       {
-        if (!evaluate(parser.value))
+        if (!evaluate(parser.value, debug))
           return false;
 
         value = current().result;
@@ -296,6 +396,33 @@ namespace tcl {
       {
         previousToken = parser.token;
         continue;
+      }
+
+      if (parser.token == EndOfLine || parser.token == EndOfFile)
+      {
+        if (debug)
+        {
+          std::cout << "Evaluating: ";
+
+          for (size_t i = 0; i < args.size(); ++i)
+            std::cout << args[i] << ",";
+          std::cout << std::endl;
+        }
+
+        if (args.size() >= 1)
+        {
+          ProcedureMap::iterator it = procedures.find(args[0]);
+          if (it == procedures.end())
+            return reportError("Could not find procedure '" + args[0] + "'");
+
+          Procedure & proc = it->second;
+
+          bool success = proc.callback(this, args, proc.data);
+          if (!success)
+            return false;
+        }
+
+        args.clear();
       }
 
       if (previousToken == Separator || previousToken == EndOfLine)
@@ -309,28 +436,20 @@ namespace tcl {
         else
           args.back() += value;
       }
+
+      if (parser.token == EndOfFile)
+        break;
     }
 
     return true;
   }
 
-  bool Context::registerProc(std::string const& name, Procedure proc)
+  bool Context::registerProc(std::string const& name, ProcedureCallback proc, void * data)
   {
-    if (procedures.find(name) != procedures.end());
+    if (procedures.find(name) != procedures.end())
       return reportError("Procedure '" + name + "' already exists!");
 
-    procedures.insert(std::make_pair(name, proc));
-    return true;
-  }
-
-  // -- Build in functions --
-
-  static bool buildInPuts(Context * ctx, std::vector<std::string> const& args, void * data)
-  {
-    if (args.size() > 1)
-      for (size_t i = 1, len = args.size(); i < len; ++i)
-        std::cout << args[i] << (((i - 1) == len) ? "" : " ");
-
+    procedures.insert(std::make_pair(name, Procedure(proc, data)));
     return true;
   }
 
