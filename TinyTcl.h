@@ -10,7 +10,7 @@ namespace tcl {
   struct Context;
   struct CallFrame;
 
-  typedef int (*Procedure)(Context * ctx, std::vector<std::string> const& args, void * data);
+  typedef bool (*Procedure)(Context * ctx, std::vector<std::string> const& args, void * data);
 
   typedef std::map<std::string, std::string> VariableMap;
 
@@ -25,10 +25,13 @@ namespace tcl {
       variables[name] = value;
     }
 
-    std::string get(std::string const& name) const
+    bool get(std::string const& name, std::string & value) const
     {
       VariableMap::const_iterator result = variables.find(name);
-      return result == variables.end() ? "" : result->second;
+      if (result == variables.end())
+        return false;
+      value = result->second;
+      return true;
     }
 
     VariableMap variables;
