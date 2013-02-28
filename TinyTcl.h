@@ -60,7 +60,7 @@ namespace tcl {
     bool evaluate(std::string const& code, bool debug = false);
     bool registerProc(std::string const& name, ProcedureCallback proc, void * data = 0);
 
-    bool arityError(std::string const& error);
+    bool arityError(std::string const& command);
     bool reportError(std::string const& _error)
     {
       error = _error;

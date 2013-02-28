@@ -2,6 +2,7 @@
 #include "TinyTcl.h"
 
 #include <iostream>
+#include <cstdlib>
 
 namespace tcl {
 
@@ -334,13 +335,34 @@ namespace tcl {
       return true;
     }
     else
-      return ctx->reportError("Wrong number of arguments to " + args[0]);
+      return ctx->arityError(args[0]);
   }
 
   static bool builtInIf(Context * ctx, ArgumentVector const& args, void * data)
   {
     if (args.size() != 3 && args.size() != 5)
-      return ctx->reportError("")
+      return ctx->arityError(args[0]);
+
+    if (!ctx->evaluate(args[1]))
+      return false;
+
+    if (std::atoi(ctx->current().result.c_str()) != 0)
+      return ctx->evaluate(args[2]);
+    else if (args.size() == 5)
+      return ctx->evaluate(args[4]);
+
+    return true;
+  }
+
+  static bool builtInMatch(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() != 3)
+      return ctx->arityError(args[0]);
+
+    if (args[0] == "==")
+      ctx->current().result = std::atoi(args[1].c_str()) == std::atoi(args[2].c_str()) ? "1" : "0";
+    else if (args[0] == "!=")
+      ctx->current().result = std::atoi(args[1].c_str()) != std::atoi(args[2].c_str()) ? "1" : "0";
 
     return true;
   }
@@ -353,11 +375,13 @@ namespace tcl {
     registerProc("puts", &builtInPuts);
     registerProc("set", &builtInSet);
     registerProc("if", &builtInIf);
+    registerProc("==", &builtInMatch);
+    registerProc("!=", &builtInMatch);
   }
 
-  bool Context::arityError(std::string const& error)
+  bool Context::arityError(std::string const& command)
   {
-
+    return reportError("Wrong number of arguments to procedure '" + command + "'");
   }
 
   bool Context::evaluate(std::string const& code, bool debug)
@@ -381,7 +405,7 @@ namespace tcl {
       {
         std::string var;
         if (current().get(value, var))
-          value = var;
+          current().result = value = var;
         else
           return reportError("Could not locate variable '" + value + "'");
       }

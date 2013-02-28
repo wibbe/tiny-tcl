@@ -9,19 +9,50 @@ int main(int argc, char * arhv[])
 
   tcl::Context ctx;
 
+  std::string completeLine = "";
+
   while (true)
   {
     char line[1024];
 
-    std::cout << "> ";
+    if (completeLine.empty())
+      std::cout << "> ";
+    else
+      std::cout << "| ";
+
     std::cin.getline(line, 1024);
 
-    if (ctx.evaluate(std::string(line), true))
+    completeLine += std::string(line);
+    int braceCount = 0;
+    for (int i = 0; i < completeLine.size(); ++i)
     {
+      switch (completeLine[i])
+      {
+        case '{':
+          braceCount++;
+          break;
+        case '[':
+          braceCount++;
+          break;
+        case '}':
+          braceCount--;
+          break;
+        case ']':
+          braceCount--;
+          break;
+      }
+    }
 
+    if (braceCount == 0)
+    {
+      if (!ctx.evaluate(completeLine, true))
+        std::cout << "Error: " << ctx.error << std::endl;
+      completeLine = "";
     }
     else
-      std::cout << "Error: " << ctx.error << std::endl;
+    {
+      completeLine += "\n";
+    }
   }
 
   return 0;
