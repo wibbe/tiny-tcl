@@ -4,8 +4,11 @@
 #include <iostream>
 #include <cstdlib>
 #include <cmath>
+#include <stdio.h>
 
 namespace tcl {
+
+  extern double calculateExpr(Context * ctx, std::string const& _str);
 
   // -- Parser --
 
@@ -339,185 +342,6 @@ namespace tcl {
       return ctx->arityError(args[0]);
   }
 
-  static std::vector<char *> split(char * str)
-  {
-    std::vector<char *> result;
-    char * start = NULL;
-
-    for (char * it = str; *it != '\0'; ++it)
-    {
-      switch (*it)
-      {
-        case ' ': case '\t':
-          if (start)
-          {
-            *it = '\0';
-            result.push_back(start);
-            start = NULL;
-          }
-          continue;
-
-        default:
-          if (!start)
-            start = it;
-      }
-    }
-
-    if (start)
-      result.push_back(start);
-
-    return result;
-  }
-
-  enum Operation
-  {
-    OpNone,
-    OpMul,
-    OpDiv,
-    OpRest,
-    OpAdd,
-    OpSub,
-    OpLess,
-    OpGreater,
-    OpEqual,
-    OpNotEqual,
-    OpLogicAnd,
-    OpLogicOr
-  };
-
-  static double calc(double a, double b, Operation op)
-  {
-    switch (op)
-    {
-      case OpNone:
-        return 0.0;
-      case OpMul:
-        return a * b;
-      case OpDiv:
-        return a / b;
-      case OpRest:
-        return (double)((long)a % (long)b);
-      case OpAdd:
-        return a + b;
-      case OpSub:
-        return a - b;
-      case OpLess:
-        return a < b ? 1.0 : 0.0;
-      case OpGreater:
-        return a > b ? 1.0 : 0.0;
-      case OpEqual:
-        return std::abs(a - b) < 0.0000001 ? 1.0 : 0.0;
-      case OpNotEqual:
-        return std::abs(a - b) > 0.0000001 ? 1.0 : 0.0;
-      case OpLogicAnd:
-        return a > 0.0 && b > 0.0 ? 1.0 : 0.0;
-      case OpLogicOr:
-        return a > 0.0 || b > 0.0 ? 1.0 : 0.0;
-    }
-  }
-
-  static double calculateExpr(Context * ctx, std::string const& _str)
-  {
-    char * str = strndup(_str.c_str(), _str.size());
-    std::vector<char *> tokens = split(str);
-    std::vector<double> values;
-    std::vector<Operation> operand;
-
-    for (size_t i = 0; i < tokens.size(); ++i)
-    {
-      char * token = tokens[i];
-
-      if (token[0] >= '0' && token[0] <= '9')
-      {
-        values.push_back(std::atof(token));
-      }
-      else if (token[0] == '$' && ctx)
-      {
-        values.push_back(std::atof(ctx->current().get(token).c_str()));
-      }
-      else
-      {
-        Operation op = OpNone;
-
-        switch (token[0])
-        {
-          case '*':
-            op = OpMul;
-            break;
-          case '/':
-            op = OpDiv;
-            break;
-          case '%':
-            op = OpRest;
-            break;
-          case '+':
-            op = OpAdd;
-            break;
-          case '-':
-            op = OpSub;
-            break;
-          case '<':
-            op = OpLess;
-            break;
-          case '>':
-            op = OpGreater;
-            break;
-          case '=':
-            if (token[1] == '=')
-              op = OpEqual;
-            break;
-          case '!':
-            if (token[1] == '=')
-              op = OpNotEqual;
-            break;
-          case '&':
-            if (token[1] == '&')
-              op = OpLogicAnd;
-            break;
-          case '|':
-            if (token[1] == '|')
-              op = OpLogicOr;
-            break;
-        }
-
-        if (op != OpNone)
-        {
-          if (operand.empty() || operand.back() > op)
-            operand.push_back(op);
-          else if (values.size() >= 2 && !operand.empty())
-          {
-            Operation opToApply = operand.back();
-            operand.pop_back();
-            operand.push_back(op);
-
-            double b = values.back();
-            values.pop_back();
-            double a = values.back();
-            values.pop_back();
-            values.push_back(calc(a, b, opToApply));
-          }
-        }
-      }
-    }
-
-    // Apply the last operands
-    while (!operand.empty() && values.size() >= 2)
-    {
-      Operation op = operand.back();
-      operand.pop_back();
-
-      double b = values.back();
-      values.pop_back();
-      double a = values.back();
-      values.pop_back();
-      values.push_back(calc(a, b, op));
-    }
-
-    free(str);
-
-    return values.empty() ? 0.0 : values.back();
-  }
-
   static bool builtInExpr(Context * ctx, ArgumentVector const& args, void * data)
   {
     if (args.size() == 1)
@@ -527,11 +351,12 @@ namespace tcl {
     for (size_t i = 1; i < args.size(); ++i)
       str += args[i];
 
+    ctx->reportError("");
     double result = calculateExpr(ctx, str);
     char buf[128];
     snprintf(buf, 128, "%f", result);
     ctx->current().result = std::string(buf);
-    return true;
+    return ctx->error.empty();
   }
 
   static bool builtInIf(Context * ctx, ArgumentVector const& args, void * data)
@@ -539,10 +364,9 @@ namespace tcl {
     if (args.size() != 3 && args.size() != 5)
       return ctx->arityError(args[0]);
 
-    if (!ctx->evaluate(args[1]))
-      return false;
+    double result = calculateExpr(ctx, args[1]);
 
-    if (std::atoi(ctx->current().result.c_str()) != 0)
+    if (result > 0.0)
       return ctx->evaluate(args[2]);
     else if (args.size() == 5)
       return ctx->evaluate(args[4]);
