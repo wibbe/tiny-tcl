@@ -54,6 +54,8 @@ int main(int argc, char * argv[])
     {
       if (!ctx.evaluate(completeLine, debug))
         std::cout << "Error: " << ctx.error << std::endl;
+      else if (!ctx.current().result.empty())
+        std::cout << ctx.current().result << std::endl;
       completeLine = "";
     }
     else
