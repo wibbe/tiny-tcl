@@ -63,7 +63,7 @@ namespace tcl {
   {
     Context();
 
-    bool evaluate(std::string const& code, bool debug = false);
+    bool evaluate(std::string const& code);
     bool registerProc(std::string const& name, ProcedureCallback proc, void * data = 0);
 
     bool arityError(std::string const& command);
@@ -79,6 +79,7 @@ namespace tcl {
     CallFrameVector frames;
 
     std::string error;
+    bool debug;
   };
 
 }

@@ -4,21 +4,29 @@
 
 #include "TinyTcl.h"
 
+bool run = true;
+
+bool exitProc(tcl::Context * ctx, tcl::ArgumentVector const& args, void * data)
+{
+  run = false;
+  return true;
+}
+
 int main(int argc, char * argv[])
 {
   std::cout << "Tiny Tcl" << std::endl;
 
   tcl::Context ctx;
+  ctx.registerProc("exit", exitProc);
 
   std::string completeLine = "";
 
-  bool debug = false;
   if (argc > 1)
     for (int i = 1; i < argc; ++i)
       if (strcmp(argv[i], "-d") == 0)
-        debug = true;
+        ctx.debug = true;
 
-  while (true)
+  while (run)
   {
     char line[1024];
 
@@ -52,7 +60,7 @@ int main(int argc, char * argv[])
 
     if (braceCount == 0)
     {
-      if (!ctx.evaluate(completeLine, debug))
+      if (!ctx.evaluate(completeLine))
         std::cout << "Error: " << ctx.error << std::endl;
       else if (!ctx.current().result.empty())
         std::cout << ctx.current().result << std::endl;

@@ -10,6 +10,22 @@ namespace tcl {
 
   extern double calculateExpr(Context * ctx, std::string const& _str);
 
+  // -- Utils --
+
+  void split(std::string const& input, std::string const& delims, std::vector<std::string> & result)
+  {
+    std::string::size_type lastPos = input.find_first_not_of(delims, 0);
+    std::string::size_type pos = input.find_first_of(delims, lastPos);
+
+    while (std::string::npos != pos || std::string::npos != lastPos)
+    {
+      result.push_back(input.substr(lastPos, pos - lastPos));
+
+      lastPos = input.find_first_not_of(delims, pos);
+      pos = input.find_first_of(delims, lastPos);
+    }
+  }
+
   // -- Parser --
 
   enum Token
@@ -374,30 +390,70 @@ namespace tcl {
     return true;
   }
 
-  static bool builtInMatch(Context * ctx, ArgumentVector const& args, void * data)
+  struct ProcData
   {
-    if (args.size() != 3)
+    std::vector<std::string> arguments;
+    std::string body;
+  };
+
+  static bool builtInProcExec(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (!data)
+      return ctx->reportError("Runtime error in '" + args[0] + "'");
+
+    ProcData * procData = static_cast<ProcData *>(data);
+
+    if ((args.size() - 1) != procData->arguments.size())
+      return ctx->reportError("Procedure '" + args[0] + "' called with wrong number of arguments");
+
+    ctx->frames.push_back(CallFrame());
+
+    // Setup arguments
+    for (size_t i = 0, len = procData->arguments.size(); i < len; ++i)
+      ctx->current().set(procData->arguments[i], args[i + 1]);
+
+    bool err = ctx->evaluate(procData->body);
+    std::string result = ctx->current().result;
+    ctx->frames.pop_back();
+    ctx->current().result = result;
+
+    return err || (!err && ctx->error.empty());
+  }
+
+  static bool builtInProc(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() != 4)
       return ctx->arityError(args[0]);
 
-    if (args[0] == "==")
-      ctx->current().result = std::atoi(args[1].c_str()) == std::atoi(args[2].c_str()) ? "1" : "0";
-    else if (args[0] == "!=")
-      ctx->current().result = std::atoi(args[1].c_str()) != std::atoi(args[2].c_str()) ? "1" : "0";
+    ProcData * procData = new ProcData;
+    procData->body = args[3];
+    split(args[2], " \t", procData->arguments);
 
-    return true;
+    return ctx->registerProc(args[1], builtInProcExec, procData);
+  }
+
+  static bool builtInReturn(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() != 2)
+      return ctx->arityError(args[0]);
+
+    ctx->current().result = args[1];
+    ctx->error = "";
+    return false;
   }
 
   // -- Context --
 
   Context::Context()
+    : debug(false)
   {
     frames.push_back(CallFrame());
     registerProc("puts", &builtInPuts);
     registerProc("set", &builtInSet);
     registerProc("if", &builtInIf);
-    registerProc("==", &builtInMatch);
-    registerProc("!=", &builtInMatch);
     registerProc("expr", &builtInExpr);
+    registerProc("proc", &builtInProc);
+    registerProc("return", &builtInReturn);
   }
 
   bool Context::arityError(std::string const& command)
@@ -405,7 +461,7 @@ namespace tcl {
     return reportError("Wrong number of arguments to procedure '" + command + "'");
   }
 
-  bool Context::evaluate(std::string const& code, bool debug)
+  bool Context::evaluate(std::string const& code)
   {
     Parser parser(code);
 
@@ -432,7 +488,7 @@ namespace tcl {
       }
       else if (parser.token == Command)
       {
-        if (!evaluate(parser.value, debug))
+        if (!evaluate(parser.value))
           return false;
 
         value = current().result;
@@ -470,16 +526,19 @@ namespace tcl {
         args.clear();
       }
 
-      if (previousToken == Separator || previousToken == EndOfLine)
+      if (!value.empty())
       {
-        args.push_back(value);
-      }
-      else
-      {
-        if (args.empty())
+        if (previousToken == Separator || previousToken == EndOfLine)
+        {
           args.push_back(value);
+        }
         else
-          args.back() += value;
+        {
+          if (args.empty())
+            args.push_back(value);
+          else
+            args.back() += value;
+        }
       }
 
       if (parser.token == EndOfFile)
