@@ -10,8 +10,17 @@ namespace tcl {
   struct Context;
   struct CallFrame;
 
+  enum ReturnCode
+  {
+    RET_ERROR,
+    RET_OK,
+    RET_RETURN,
+    RET_BREAK,
+    RET_CONTINUE
+  };
+
   typedef std::vector<std::string> ArgumentVector;
-  typedef bool (*ProcedureCallback)(Context * ctx, ArgumentVector const& args, void * data);
+  typedef ReturnCode (*ProcedureCallback)(Context * ctx, ArgumentVector const& args, void * data);
 
   typedef std::map<std::string, std::string> VariableMap;
 
@@ -63,15 +72,11 @@ namespace tcl {
   {
     Context();
 
-    bool evaluate(std::string const& code);
+    ReturnCode evaluate(std::string const& code);
     bool registerProc(std::string const& name, ProcedureCallback proc, void * data = 0);
 
-    bool arityError(std::string const& command);
-    bool reportError(std::string const& _error)
-    {
-      error = _error;
-      return false;
-    }
+    ReturnCode arityError(std::string const& command);
+    ReturnCode reportError(std::string const& _error);
 
     CallFrame & current() { return frames.back(); }
 

@@ -329,7 +329,7 @@ namespace tcl {
 
   // -- Build in functions --
 
-  static bool builtInPuts(Context * ctx, ArgumentVector const& args, void * data)
+  static ReturnCode builtInPuts(Context * ctx, ArgumentVector const& args, void * data)
   {
     if (args.size() > 1)
       for (size_t i = 1, len = args.size(); i < len; ++i)
@@ -337,28 +337,28 @@ namespace tcl {
 
     std::cout << std::endl;
 
-    return true;
+    return RET_OK;
   }
 
-  static bool builtInSet(Context * ctx, ArgumentVector const& args, void * data)
+  static ReturnCode builtInSet(Context * ctx, ArgumentVector const& args, void * data)
   {
     const size_t len = args.size();
 
     if (len == 2)
     {
-      return ctx->current().get(args[1], ctx->current().result);
+      return ctx->current().get(args[1], ctx->current().result) ? RET_OK : RET_ERROR;
     }
     else if (len == 3)
     {
       ctx->current().result = args[2];
       ctx->current().set(args[1], args[2]);
-      return true;
+      return RET_OK;
     }
     else
       return ctx->arityError(args[0]);
   }
 
-  static bool builtInExpr(Context * ctx, ArgumentVector const& args, void * data)
+  static ReturnCode builtInExpr(Context * ctx, ArgumentVector const& args, void * data)
   {
     if (args.size() == 1)
       return ctx->arityError(args[0]);
@@ -372,10 +372,10 @@ namespace tcl {
     char buf[128];
     snprintf(buf, 128, "%f", result);
     ctx->current().result = std::string(buf);
-    return ctx->error.empty();
+    return ctx->error.empty() ? RET_OK : RET_ERROR;
   }
 
-  static bool builtInIf(Context * ctx, ArgumentVector const& args, void * data)
+  static ReturnCode builtInIf(Context * ctx, ArgumentVector const& args, void * data)
   {
     if (args.size() != 3 && args.size() != 5)
       return ctx->arityError(args[0]);
@@ -387,7 +387,7 @@ namespace tcl {
     else if (args.size() == 5)
       return ctx->evaluate(args[4]);
 
-    return true;
+    return RET_OK;
   }
 
   struct ProcData
@@ -396,7 +396,7 @@ namespace tcl {
     std::string body;
   };
 
-  static bool builtInProcExec(Context * ctx, ArgumentVector const& args, void * data)
+  static ReturnCode builtInProcExec(Context * ctx, ArgumentVector const& args, void * data)
   {
     if (!data)
       return ctx->reportError("Runtime error in '" + args[0] + "'");
@@ -412,15 +412,15 @@ namespace tcl {
     for (size_t i = 0, len = procData->arguments.size(); i < len; ++i)
       ctx->current().set(procData->arguments[i], args[i + 1]);
 
-    bool err = ctx->evaluate(procData->body);
+    ReturnCode retCode = ctx->evaluate(procData->body);
     std::string result = ctx->current().result;
     ctx->frames.pop_back();
     ctx->current().result = result;
 
-    return err || (!err && ctx->error.empty());
+    return retCode;
   }
 
-  static bool builtInProc(Context * ctx, ArgumentVector const& args, void * data)
+  static ReturnCode builtInProc(Context * ctx, ArgumentVector const& args, void * data)
   {
     if (args.size() != 4)
       return ctx->arityError(args[0]);
@@ -429,17 +429,94 @@ namespace tcl {
     procData->body = args[3];
     split(args[2], " \t", procData->arguments);
 
-    return ctx->registerProc(args[1], builtInProcExec, procData);
+    return ctx->registerProc(args[1], builtInProcExec, procData) ? RET_OK : RET_ERROR;
   }
 
-  static bool builtInReturn(Context * ctx, ArgumentVector const& args, void * data)
+  static ReturnCode builtInReturn(Context * ctx, ArgumentVector const& args, void * data)
   {
     if (args.size() != 2)
       return ctx->arityError(args[0]);
 
     ctx->current().result = args[1];
-    ctx->error = "";
-    return false;
+    return RET_RETURN;
+  }
+
+  static ReturnCode builtInError(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() != 2)
+      return ctx->arityError(args[0]);
+    return ctx->reportError(args[1]);
+  }
+
+  static ReturnCode builtInEval(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() != 2)
+      return ctx->arityError(args[0]);
+
+    std::string str;
+    for (size_t i = 1; i < args.size(); ++i)
+      str += args[i] + " ";
+
+    return ctx->evaluate(str);
+  }
+
+  static ReturnCode builtInWhile(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() != 3)
+      return ctx->arityError(args[0]);
+
+    const std::string check = "expr " + args[1];
+
+    while (true)
+    {
+      ReturnCode retCode = ctx->evaluate(check);
+      if (retCode != RET_OK)
+        return retCode;
+
+      if (std::atof(ctx->current().result.c_str()) > 0.0)
+      {
+        retCode = ctx->evaluate(args[2]);
+        if (retCode == RET_OK || retCode == RET_CONTINUE)
+          continue;
+        else if (retCode == RET_BREAK)
+          return RET_OK;
+        else
+          return retCode;
+      }
+      else
+      {
+        return RET_OK;
+      }
+    }
+  }
+
+  static ReturnCode buildInRetCode(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args[0] == "break")
+      return RET_BREAK;
+    return RET_CONTINUE;
+  }
+
+  static ReturnCode builtInIncr(Context * ctx, ArgumentVector const& args, void * data)
+  {
+    if (args.size() != 2 && args.size() != 3)
+      return ctx->arityError(args[0]);
+
+    std::string var;
+    if (!ctx->current().get(args[1], var))
+      return ctx->reportError("Could not find variable '" + args[1] + "'");
+
+    int inc = 1;
+    int value = std::atoi(var.c_str());
+
+    if (args.size() == 3)
+      inc = std::atoi(args[2].c_str());
+
+    char buf[32];
+    snprintf(buf, 32, "%d", value + inc);
+    ctx->current().set(args[1], std::string(buf));
+    ctx->current().result = std::string(buf);
+    return RET_OK;
   }
 
   // -- Context --
@@ -454,14 +531,26 @@ namespace tcl {
     registerProc("expr", &builtInExpr);
     registerProc("proc", &builtInProc);
     registerProc("return", &builtInReturn);
+    registerProc("error", &builtInError);
+    registerProc("eval", &builtInEval);
+    registerProc("while", &builtInWhile);
+    registerProc("break", &buildInRetCode);
+    registerProc("continue", &buildInRetCode);
+    registerProc("incr", &builtInIncr);
   }
 
-  bool Context::arityError(std::string const& command)
+  ReturnCode Context::reportError(std::string const& _error)
+  {
+    error = _error;
+    return RET_ERROR;
+  }
+
+  ReturnCode Context::arityError(std::string const& command)
   {
     return reportError("Wrong number of arguments to procedure '" + command + "'");
   }
 
-  bool Context::evaluate(std::string const& code)
+  ReturnCode Context::evaluate(std::string const& code)
   {
     Parser parser(code);
 
@@ -472,7 +561,7 @@ namespace tcl {
     {
       Token previousToken = parser.token;
       if (!parser.next())
-        return false;
+        return RET_ERROR;
 
       if (debug)
         std::cout << "Token: " << tokenAsReadable[parser.token] << " = '" << parser.value << "'" << std::endl;
@@ -489,7 +578,7 @@ namespace tcl {
       else if (parser.token == Command)
       {
         if (!evaluate(parser.value))
-          return false;
+          return RET_ERROR;
 
         value = current().result;
       }
@@ -518,9 +607,9 @@ namespace tcl {
 
           Procedure & proc = it->second;
 
-          bool success = proc.callback(this, args, proc.data);
-          if (!success)
-            return false;
+          ReturnCode retCode = proc.callback(this, args, proc.data);
+          if (retCode != RET_OK)
+            return retCode;
         }
 
         args.clear();
@@ -545,7 +634,7 @@ namespace tcl {
         break;
     }
 
-    return true;
+    return RET_OK;
   }
 
   bool Context::registerProc(std::string const& name, ProcedureCallback proc, void * data)

@@ -6,10 +6,10 @@
 
 bool run = true;
 
-bool exitProc(tcl::Context * ctx, tcl::ArgumentVector const& args, void * data)
+tcl::ReturnCode exitProc(tcl::Context * ctx, tcl::ArgumentVector const& args, void * data)
 {
   run = false;
-  return true;
+  return tcl::RET_OK;
 }
 
 int main(int argc, char * argv[])
@@ -60,7 +60,7 @@ int main(int argc, char * argv[])
 
     if (braceCount == 0)
     {
-      if (!ctx.evaluate(completeLine))
+      if (ctx.evaluate(completeLine) == tcl::RET_ERROR)
         std::cout << "Error: " << ctx.error << std::endl;
       else if (!ctx.current().result.empty())
         std::cout << ctx.current().result << std::endl;
